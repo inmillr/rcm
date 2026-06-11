@@ -1,6 +1,6 @@
 package aggregate
 
-import "csvparser/internal/model"
+import "rcm/internal/model"
 
 func ByPATID(claims []model.Claim) map[string]float64 {
 

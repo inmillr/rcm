@@ -1,65 +1,124 @@
 package main
 
 import (
-	"csvparser/config"
-	"csvparser/internal/aggregate"
-	"csvparser/internal/extract"
-	"csvparser/internal/load"
-	"csvparser/internal/model"
-	"csvparser/internal/transform"
-	"csvparser/internal/validate"
 	"fmt"
+
+	"rcm/internal/extract"
+	"rcm/internal/join"
+	"rcm/internal/model"
+	"rcm/internal/transform"
 )
 
 func main() {
 
-	cfg := config.Load()
+	// ----- CLAIMS ----------
+	var claims []model.Claim
 
-	reader, file, err := extract.Stream(cfg.InputFile)
+	claimReader, claimFile, err := extract.Stream("data/claims.csv")
 	if err != nil {
 		panic(err)
 	}
-	defer file.Close()
-
-	var claims []model.Claim
-	var rejects int
+	defer claimFile.Close()
 
 	for i := 0; ; i++ {
-
-		row, err := reader.Read()
+		row, err := claimReader.Read()
 		if err != nil {
 			break
 		}
 
 		if i == 0 {
-			continue // ----- skip header row
-		}
-
-		ok, reason := validate.Row(row)
-		if !ok {
-			rejects++
-			fmt.Println("reject:", reason, row)
 			continue
 		}
 
 		claim, err := transform.RowToClaim(row)
 		if err != nil {
-			rejects++
-			fmt.Println("transform error:", err)
+			fmt.Println("Claim Transform Error:", err)
 			continue
 		}
 
 		claims = append(claims, claim)
 	}
 
-	fmt.Println("records:", len(claims), "rejects:", rejects)
+	// ----- PAYMENTS ----------
+	var payments []model.Payment
 
-	totals := aggregate.ByPATID(claims)
-
-	err = load.ToCSV(cfg.OutputFile, totals)
+	paymentReader, paymentFile, err := extract.Stream("data/payments.csv")
 	if err != nil {
 		panic(err)
 	}
+	defer paymentFile.Close()
 
-	fmt.Println("ETL Complete!")
+	for i := 0; ; i++ {
+
+		row, err := paymentReader.Read()
+		if err != nil {
+			break
+		}
+
+		if i == 0 {
+			continue
+		}
+
+		payment, err := transform.RowToPayment(row)
+		if err != nil {
+			fmt.Println("Payment Transform Error:", err)
+			continue
+		}
+
+		payments = append(payments, payment)
+	}
+
+	// ----- COB REFERENCE ----------
+	var cobRefs []model.COBReference
+	cobReader, cobFile, err := extract.Stream("data/cob_order.csv")
+	if err != nil {
+		panic(err)
+	}
+	defer cobFile.Close()
+
+	for i := 0; ; i++ {
+
+		row, err := cobReader.Read()
+		if err != nil {
+			break
+		}
+
+		if i == 0 {
+			continue
+		}
+
+		ref, err := transform.RowToCOBReference(row)
+		if err != nil {
+			fmt.Println("COB Transform Error:", err)
+			continue
+		}
+
+		cobRefs = append(cobRefs, ref)
+	}
+
+	// ----- VERIFY LOADS ----------
+
+	fmt.Println("Claims:", len(claims))
+	fmt.Println("Payments:", len(payments))
+	fmt.Println("COB Refs:", len(cobRefs))
+
+	// ----- BUILD LOOKUPS ----------
+
+	paymentLookup := join.BuildPaymentLookup(payments)
+
+	cobLookup := join.BuildCOBLookup(cobRefs)
+
+	// ----- JOIN ----------
+
+	rcmRows := join.BuildRCMRows(claims, paymentLookup, cobLookup)
+
+	// ----- OUTPUT ----------
+
+	fmt.Println()
+	fmt.Println("RCM Results")
+	fmt.Println("----------")
+
+	for _, row := range rcmRows {
+		fmt.Printf("%+v\n", row)
+	}
 }

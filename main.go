@@ -7,7 +7,7 @@ import (
 	"strconv"      // For converting strings to numbers
 )
 
-// Define the Claim structure
+// ----- Define the Claim structure
 type Claim struct {
 	PATID       string
 	ServiceDate string
@@ -15,59 +15,116 @@ type Claim struct {
 	Amount      float64
 }
 
-func main() {
-	file, err := os.Open("claims.csv")
+// ----- Extract data from a CSV file (claims.csv)
+func extract(path string) ([][]string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return nil, err
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file) // Create CSV Reader
+	reader := csv.NewReader(file)
+	return reader.ReadAll()
+}
 
-	records, err := reader.ReadAll() // Load file into memory
-	if err != nil {
-		fmt.Println(err)
-		return
+// ----- Validate the data (clean bad rows)
+func validateRows(row []string) bool {
+	if len(row) < 4 {
+		return false
 	}
 
-	// for _, row := range records { // Each row is a []string (slice of strings), records is a [][]string (slice of rows)
-	// 	fmt.Println(row)
-	// }
+	if row[0] == "" || row[3] == "" {
+		return false
+	}
 
-	var claims []Claim // create a slice of Claim structs
+	return true
+}
+
+// ----- Transform the data (convert to structs)
+func transform(records [][]string) ([]Claim, error) {
+	var claims []Claim
 
 	for i, row := range records {
 
+		// skip the header row
 		if i == 0 {
+			continue
+		}
+
+		if !validateRows(row) {
 			continue
 		}
 
 		amount, err := strconv.ParseFloat(row[3], 64)
 		if err != nil {
-			fmt.Printf("Bad amoun on row %d\n", i)
 			continue
 		}
 
-		claim := Claim{
+		claims = append(claims, Claim{
 			PATID:       row[0],
 			ServiceDate: row[1],
 			DeniedCode:  row[2],
 			Amount:      amount,
-		}
-
-		claims = append(claims, claim) // Add a new item to the claims slice
+		})
 	}
 
-	for _, claim := range claims {
-		fmt.Printf("%+v\n", claim)
+	return claims, nil
+}
+
+// ----- Aggregate the data
+func aggregate(claims []Claim) map[string]float64 {
+
+	totals := make(map[string]float64)
+
+	for _, c := range claims {
+		totals[c.PATID] += c.Amount
 	}
 
-	var total float64
+	return totals
+}
 
-	for _, claim := range claims { // ignore index, process only row data
-		total += claim.Amount
+// ----- Load the data (write CSV output)
+func load(path string, totals map[string]float64) error {
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	writer.Write([]string{"PATID", "TotalAmount"})
+
+	for patid, total := range totals {
+		writer.Write([]string{
+			patid,
+			fmt.Sprintf("%.2f", total),
+		})
 	}
 
-	fmt.Printf("Total Amount: %.2f\n", total)
+	return nil
+}
+
+func main() {
+
+	records, err := extract("claims.csv")
+	if err != nil {
+		panic(err)
+	}
+
+	claims, err := transform(records)
+	if err != nil {
+		panic(err)
+	}
+
+	totals := aggregate(claims)
+
+	err = load("output.csv", totals)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("ETL complete")
 }

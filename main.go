@@ -35,7 +35,7 @@ func main() {
 	// 	fmt.Println(row)
 	// }
 
-	var claims []Claim
+	var claims []Claim // create a slice of Claim structs
 
 	for i, row := range records {
 
@@ -56,10 +56,18 @@ func main() {
 			Amount:      amount,
 		}
 
-		claims = append(claims, claim)
+		claims = append(claims, claim) // Add a new item to the claims slice
 	}
 
 	for _, claim := range claims {
 		fmt.Printf("%+v\n", claim)
 	}
+
+	var total float64
+
+	for _, claim := range claims { // ignore index, process only row data
+		total += claim.Amount
+	}
+
+	fmt.Printf("Total Amount: %.2f\n", total)
 }
